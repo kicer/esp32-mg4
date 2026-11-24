@@ -9,6 +9,8 @@
 #include "lwip/inet.h"
 #include "nvs_flash.h"
 
+#include "rules.h"
+
 static const char *TAG = "main";
 
 #define AP_SSID "MG4-AP"
@@ -60,6 +62,7 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
+    rules_init();
     ESP_LOGI(TAG, "==== MG4 注入固件启动 ====");
     wifi_init_ap();
 

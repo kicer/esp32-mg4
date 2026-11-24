@@ -408,15 +408,17 @@ void tls443_start(void) {
         ESP_LOGE(TAG, "证书解析失败 -0x%04X", -ret);
         return;
     }
-    ret = mbedtls_pk_parse_key(&s_key, (const unsigned char *)g_key_pem,
-                               strlen(g_key_pem) + 1, NULL, 0);
-    if (ret < 0) {
-        ESP_LOGE(TAG, "私钥解析失败 -0x%04X", -ret);
-        return;
-    }
+    // mbedTLS 3.x 解析私钥需要 rng，所以先 seed
     ret = mbedtls_ctr_drbg_seed(&s_drbg, mbedtls_entropy_func, &s_entropy, NULL, 0);
     if (ret != 0) {
         ESP_LOGE(TAG, "drbg 失败 -0x%04X", -ret);
+        return;
+    }
+    ret = mbedtls_pk_parse_key(&s_key, (const unsigned char *)g_key_pem,
+                               strlen(g_key_pem) + 1, NULL, 0,
+                               mbedtls_ctr_drbg_random, &s_drbg);
+    if (ret < 0) {
+        ESP_LOGE(TAG, "私钥解析失败 -0x%04X", -ret);
         return;
     }
     ret = mbedtls_ssl_config_defaults(&s_conf, MBEDTLS_SSL_IS_SERVER,

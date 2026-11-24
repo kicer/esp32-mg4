@@ -20,12 +20,15 @@ typedef enum {
     RULE_PNG,
 } rule_id_t;
 
-extern const blob_t g_detail_tpl;
-extern const blob_t g_banner;
-extern const blob_t g_recommend;
-extern const blob_t g_ordinary;
-extern const blob_t g_apk;
-extern const blob_t g_png;
+// 外部符号地址相减不是编译期常量，只能运行时赋值（见 rules_init）
+extern blob_t g_detail_tpl;
+extern blob_t g_banner;
+extern blob_t g_recommend;
+extern blob_t g_ordinary;
+extern blob_t g_apk;
+extern blob_t g_png;
+
+void rules_init(void);
 extern const char *g_chain_pem;
 extern const char *g_key_pem;
 

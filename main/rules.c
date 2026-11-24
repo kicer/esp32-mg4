@@ -20,18 +20,35 @@ extern const uint8_t _binary_assets_recommend_json_end[] asm("_binary_assets_rec
 extern const uint8_t _binary_assets_ordinary_json_start[] asm("_binary_assets_ordinary_json_start");
 extern const uint8_t _binary_assets_ordinary_json_end[] asm("_binary_assets_ordinary_json_end");
 
-#define BLOB(s, e)     {(const uint8_t *)(s), (size_t)((e) - (s))}
-// EMBED_TXTFILES 末尾会自动补一个 \0，长度要减掉
-#define BLOB_TXT(s, e) {(const uint8_t *)(s), (size_t)((e) - (s) - 1)}
+// EMBED_TXTFILES 末尾会自动补一个 \0，文本长度要减掉
+#define SET_BLOB_TXT(b, s, e) do { \
+    (b).data = (const uint8_t *)(s); \
+    (b).len = (size_t)((e) - (s)) - 1; \
+} while (0)
+#define SET_BLOB(b, s, e) do { \
+    (b).data = (const uint8_t *)(s); \
+    (b).len = (size_t)((e) - (s)); \
+} while (0)
 
-const blob_t g_detail_tpl = BLOB_TXT(_binary_assets_detail_json_start, _binary_assets_detail_json_end);
-const blob_t g_banner = BLOB_TXT(_binary_assets_banner_json_start, _binary_assets_banner_json_end);
-const blob_t g_recommend = BLOB_TXT(_binary_assets_recommend_json_start, _binary_assets_recommend_json_end);
-const blob_t g_ordinary = BLOB_TXT(_binary_assets_ordinary_json_start, _binary_assets_ordinary_json_end);
-const blob_t g_apk = BLOB(_binary_assets_mg4_adb_apk_start, _binary_assets_mg4_adb_apk_end);
-const blob_t g_png = BLOB(_binary_assets_placeholder_png_start, _binary_assets_placeholder_png_end);
+blob_t g_detail_tpl;
+blob_t g_banner;
+blob_t g_recommend;
+blob_t g_ordinary;
+blob_t g_apk;
+blob_t g_png;
+
+// 指针型资源地址是链接期常量，可以直接静态初始化
 const char *g_chain_pem = _binary_assets_chain_pem_start;
 const char *g_key_pem = _binary_assets_leaf_key_pem_start;
+
+void rules_init(void) {
+    SET_BLOB_TXT(g_detail_tpl, _binary_assets_detail_json_start, _binary_assets_detail_json_end);
+    SET_BLOB_TXT(g_banner, _binary_assets_banner_json_start, _binary_assets_banner_json_end);
+    SET_BLOB_TXT(g_recommend, _binary_assets_recommend_json_start, _binary_assets_recommend_json_end);
+    SET_BLOB_TXT(g_ordinary, _binary_assets_ordinary_json_start, _binary_assets_ordinary_json_end);
+    SET_BLOB(g_apk, _binary_assets_mg4_adb_apk_start, _binary_assets_mg4_adb_apk_end);
+    SET_BLOB(g_png, _binary_assets_placeholder_png_start, _binary_assets_placeholder_png_end);
+}
 
 // 需要劫持 / 本地响应的域名
 static const char *const k_hosts[] = {
