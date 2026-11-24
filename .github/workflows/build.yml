@@ -2,8 +2,12 @@ name: build
 
 on:
   push:
-    branches: ["*"]
+    branches: [main]
   workflow_dispatch:
+
+# 建 release 需要写权限
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -18,17 +22,39 @@ jobs:
           target: esp32s3
           path: '.'
 
-      - name: Show size
+      - name: Collect firmware
         run: |
-          ls -l build/bootloader/bootloader.bin build/partition_table/partition-table.bin build/*.bin || true
-          idf.py size 2>/dev/null || true
+          mkdir -p dist
+          cp build/bootloader/bootloader.bin        dist/bootloader.bin
+          cp build/partition_table/partition-table.bin dist/partition-table.bin
+          cp build/esp32-mg4.bin                     dist/esp32-mg4.bin
+          cd dist && sha256sum *.bin > SHA256SUMS
+          echo "=== 产物 ===" && ls -l
 
-      - name: Upload firmware
+      - name: Size report
+        if: success()
+        run: ls -l dist && sha256sum -c dist/SHA256SUMS --ignore-missing 2>/dev/null || true
+
+      # 产物公开可下载：releases/download/build-N/<file>
+      - name: Release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: build-${{ github.run_number }}
+          prerelease: true
+          make_latest: false
+          body: |
+            commit: `${{ github.sha }}`
+            run: #${{ github.run_number }}
+            目标: ESP32-S3, flash 8MB, Octal PSRAM
+          files: dist/*
+
+      - name: Upload artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: esp32-mg4-firmware
-          path: |
-            build/bootloader/bootloader.bin
-            build/partition_table/partition-table.bin
-            build/esp32-mg4.bin
-          if-no-files-found: error
+          path: dist/
+          if-no-files-found: warn
+          retention-days: 14
