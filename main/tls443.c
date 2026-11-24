@@ -227,7 +227,9 @@ static void conn_task(void *arg) {
 
     int ret = mbedtls_ssl_handshake(ssl);
     if (ret != 0) {
-        ESP_LOGW(TAG, "TLS 握手失败 %s: -0x%04X", sni, -ret);
+        char ebuf[96] = {0};
+        mbedtls_strerror(ret, ebuf, sizeof(ebuf));
+        ESP_LOGW(TAG, "TLS 握手失败 %s: -0x%04X (%s)", sni, -ret, ebuf);
         mbedtls_ssl_free(ssl);
         free(ssl);
         goto done;
