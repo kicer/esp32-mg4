@@ -22,9 +22,19 @@
 
 static const char *TAG = "tls443";
 
-static mbedtls_ssl_config s_conf;
+// 证书链只读，可全局共享；
+// 但 ssl_config 和 pk_context（RSA 私钥）都不是线程安全的，
+// 多连接并发签名会互相污染状态，导致 mbedtls_pk_sign() 自检失败 (-0x4380)。
+// 所以 config 和 key 都改成每连接独立，drbg 用互斥锁保护。
 static mbedtls_x509_crt s_crt;
-static mbedtls_pk_context s_key;
+static SemaphoreHandle_t s_rng_mutex = NULL;
+
+static int locked_rng(void *ctx, unsigned char *out, size_t len) {
+    xSemaphoreTake(s_rng_mutex, portMAX_DELAY);
+    int ret = mbedtls_ctr_drbg_random(ctx, out, len);
+    xSemaphoreGive(s_rng_mutex);
+    return ret;
+}
 static mbedtls_ctr_drbg_context s_drbg;
 static mbedtls_entropy_context s_entropy;
 
@@ -203,6 +213,10 @@ static void conn_task(void *arg) {
     char rng[48] = {0};
     char body[512] = {0};
     int body_len = 0;
+    // 每连接独立，统一在 done 里释放
+    mbedtls_ssl_context *ssl = NULL;
+    mbedtls_ssl_config  *conf = NULL;
+    mbedtls_pk_context  *key = NULL;
 
     if (peek_sni(fd, sni, sizeof(sni)) != 0) {
         ESP_LOGW(TAG, "无 SNI, 关闭");
@@ -214,14 +228,36 @@ static void conn_task(void *arg) {
         goto done;
     }
 
-    mbedtls_ssl_context *ssl = calloc(1, sizeof(mbedtls_ssl_context));
-    if (!ssl) {
+    ssl  = calloc(1, sizeof(mbedtls_ssl_context));
+    conf = calloc(1, sizeof(mbedtls_ssl_config));
+    key  = calloc(1, sizeof(mbedtls_pk_context));
+    if (!ssl || !conf || !key) {
         goto done;
     }
     mbedtls_ssl_init(ssl);
-    if (mbedtls_ssl_setup(ssl, &s_conf) != 0) {
-        mbedtls_ssl_free(ssl);
-        free(ssl);
+    mbedtls_ssl_config_init(conf);
+    mbedtls_pk_init(key);
+
+    int pkr = mbedtls_pk_parse_key(key, (const unsigned char *)g_key_pem,
+                                   strlen(g_key_pem) + 1, NULL, 0,
+                                   locked_rng, &s_drbg);
+    if (pkr != 0) {
+        ESP_LOGE(TAG, "私钥解析失败 -0x%04X", -pkr);
+        goto done;
+    }
+
+    if (mbedtls_ssl_config_defaults(conf, MBEDTLS_SSL_IS_SERVER,
+                                    MBEDTLS_SSL_TRANSPORT_STREAM,
+                                    MBEDTLS_SSL_PRESET_DEFAULT) != 0 ||
+        mbedtls_ssl_conf_own_cert(conf, &s_crt, key) != 0) {
+        ESP_LOGE(TAG, "config/证书绑定失败");
+        goto done;
+    }
+    mbedtls_ssl_conf_rng(conf, locked_rng, &s_drbg);
+    mbedtls_ssl_conf_authmode(conf, MBEDTLS_SSL_VERIFY_NONE);
+
+    if (mbedtls_ssl_setup(ssl, conf) != 0) {
+        ESP_LOGE(TAG, "ssl_setup 失败");
         goto done;
     }
     mbedtls_ssl_set_bio(ssl, &fd, bio_send, bio_recv, NULL);
@@ -235,8 +271,6 @@ static void conn_task(void *arg) {
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-        mbedtls_ssl_free(ssl);
-        free(ssl);
         goto done;
     }
 
@@ -257,8 +291,6 @@ static void conn_task(void *arg) {
         }
     }
     if (hdr_end < 0) {
-        mbedtls_ssl_free(ssl);
-        free(ssl);
         goto done;
     }
 
@@ -362,10 +394,10 @@ static void conn_task(void *arg) {
     }
 
     mbedtls_ssl_close_notify(ssl);
-    mbedtls_ssl_free(ssl);
-    free(ssl);
-
 done:
+    if (ssl) { mbedtls_ssl_free(ssl); free(ssl); }
+    if (key) { mbedtls_pk_free(key); free(key); }
+    if (conf) { mbedtls_ssl_config_free(conf); free(conf); }
     shutdown(fd, 0);
     close(fd);
     if (s_slots) {
@@ -424,11 +456,12 @@ static void listen_task(void *arg) {
 }
 
 void tls443_start(void) {
-    mbedtls_ssl_config_init(&s_conf);
     mbedtls_x509_crt_init(&s_crt);
-    mbedtls_pk_init(&s_key);
     mbedtls_ctr_drbg_init(&s_drbg);
     mbedtls_entropy_init(&s_entropy);
+    if (!s_rng_mutex) {
+        s_rng_mutex = xSemaphoreCreateMutex();
+    }
 
     int ret = mbedtls_x509_crt_parse(&s_crt, (const unsigned char *)g_chain_pem,
                                      strlen(g_chain_pem) + 1);
@@ -436,31 +469,9 @@ void tls443_start(void) {
         ESP_LOGE(TAG, "证书解析失败 -0x%04X", -ret);
         return;
     }
-    // mbedTLS 3.x 解析私钥需要 rng，所以先 seed
     ret = mbedtls_ctr_drbg_seed(&s_drbg, mbedtls_entropy_func, &s_entropy, NULL, 0);
     if (ret != 0) {
         ESP_LOGE(TAG, "drbg 失败 -0x%04X", -ret);
-        return;
-    }
-    ret = mbedtls_pk_parse_key(&s_key, (const unsigned char *)g_key_pem,
-                               strlen(g_key_pem) + 1, NULL, 0,
-                               mbedtls_ctr_drbg_random, &s_drbg);
-    if (ret < 0) {
-        ESP_LOGE(TAG, "私钥解析失败 -0x%04X", -ret);
-        return;
-    }
-    ret = mbedtls_ssl_config_defaults(&s_conf, MBEDTLS_SSL_IS_SERVER,
-                                      MBEDTLS_SSL_TRANSPORT_STREAM,
-                                      MBEDTLS_SSL_PRESET_DEFAULT);
-    if (ret != 0) {
-        ESP_LOGE(TAG, "ssl_config 失败 -0x%04X", -ret);
-        return;
-    }
-    mbedtls_ssl_conf_rng(&s_conf, mbedtls_ctr_drbg_random, &s_drbg);
-    mbedtls_ssl_conf_authmode(&s_conf, MBEDTLS_SSL_VERIFY_NONE);
-    ret = mbedtls_ssl_conf_own_cert(&s_conf, &s_crt, &s_key);
-    if (ret != 0) {
-        ESP_LOGE(TAG, "配证书失败 -0x%04X", -ret);
         return;
     }
     ESP_LOGI(TAG, "证书就绪，启动监听");
