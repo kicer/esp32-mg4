@@ -1,7 +1,50 @@
 ================ ESP32 固件自检 ================
-2026-11-24 11:04:33
+2026-11-24 11:11:01
 
 [0] 到网关的链路
-  [!!] 本机没有 192.168.2.x 地址 —— 没连上 MG4-AP
+  [OK] en0 拿到 ��192.168.2.1 可 ping 通
+       SSID: MG4-AP
 
-请先：Wi-Fi 里连 MG4-AP（密码 mg4inject），再重跑本脚本
+[1] DNS 劫持（期望全部解析到 ��
+  [OK] 204.z-onesoft.com -> 192.168.2.1
+  [OK] prod-r-platform.z-onesoft.com -> 192.168.2.1
+  [OK] prod-dp-public-es33-tos.z-onesoft.com -> 192.168.2.1
+  [OK] prod-dp-public-es33.oss-cn-shanghai.aliyuncs.com -> 192.168.2.1
+  [OK] AAAA 查询返回空（IPv6 已抑制）
+
+[2] 80 端口（联网检测，期望 204）
+  [OK] http://192.168.2.1/ -> 204
+  [OK] http://204.z-onesoft.com/ -> 204
+
+[3] 443 TLS 证书
+  [OK] 握手成功，证书如下
+       subject=CN=prod-r-platform.z-onesoft.com, O=Local Car Unit Proxy
+       issuer=C=US, O=eMudhra Inc, CN=EM OV TLS CA - G3C
+       notBefore=Nov 10 14:51:19 2025 GMT
+       notAfter=Nov 10 14:51:19 2027 GMT
+
+[4] 三个列表接口
+  [OK] banner/list  780 bytes
+  [OK] category/recommend/list  1767 bytes
+  [OK] category/ordinary/list  4158 bytes
+
+[5] app/detail（appId 动态回填）
+  [OK] appId 已回填  1684 bytes
+  [OK] vin 已回填
+  [OK] appPackage = com.desay.xadb
+
+[6] APK 下发
+  [OK] 200  485818 bytes（与烧录固件一致）
+       sha256 90aa659baa7e4f5b7094bf3e114416b1d29a0314f3e9b1f989c09d991ac318bd
+  [OK] Range 0-0 -> 206
+
+[7] 占位图
+  [OK] 200  70 bytes
+
+[8] 未命中域名（应被拒绝，不拖时间）
+  [OK] 未命中连接已关闭，耗时 0s（应 < 2s）
+
+================ 结果 ================
+通过 19 项，失败 0 项
+全部通过 —— 固件行为与设计一致
+报告已保存: /Users/kicer/dsh/tasks/mg4/esp32-mg4/tools/selftest-report.txt

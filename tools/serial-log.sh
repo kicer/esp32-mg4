@@ -1,9 +1,7 @@
 #!/bin/bash
-# 抓 ESP32-S3 串口输出（USB-Serial/JTAG，无需 idf.py monitor）
+# 抓 ESP32-S3 串口输出（USB-Serial/JTAG）
 # 用法: bash tools/serial-log.sh [秒数] [端口]
-#   默认读 15 秒，端口自动探测 /dev/cu.usbmodem*
-
-SECS="${1:-15}"
+SECS="${1:-30}"
 PORT="${2:-$(ls /dev/cu.usbmodem* 2>/dev/null | head -1)}"
 
 if [ -z "$PORT" ]; then
@@ -12,26 +10,42 @@ if [ -z "$PORT" ]; then
 fi
 
 echo "读取 $PORT ${SECS}s ..."
-stty -f "$PORT" 115200 raw -echo 2>/dev/null
+echo ">>> 现在按一下板子上的 RESET 键，日志只在重启后 1-2 秒内输出 <<<"
 
 python3 - "$PORT" "$SECS" <<'PY'
-import os, select, sys, time
+import sys, time
+try:
+    import serial
+except ImportError:
+    print("缺 pyserial：pip3 install pyserial")
+    sys.exit(1)
 
 port, secs = sys.argv[1], float(sys.argv[2])
-fd = os.open(port, os.O_RDONLY | os.O_NONBLOCK)
+# 打开时不碰 DTR/RTS：有些板子把 DTR 拉到 EN，拉低会把芯片按在复位里
+try:
+    ser = serial.Serial()
+    ser.port = port
+    ser.baudrate = 115200
+    ser.timeout = 0.2
+    ser.dtr = False
+    ser.rts = False
+    ser.open()
+except Exception as e:
+    print(f"打开失败: {e}")
+    sys.exit(1)
+
+buf = bytearray()
 end = time.time() + secs
-buf = b""
 while time.time() < end:
-    r, _, _ = select.select([fd], [], [], 0.3)
-    if r:
-        try:
-            d = os.read(fd, 8192)
-            if d:
-                buf += d
-        except BlockingIOError:
-            pass
-os.close(fd)
-sys.stdout.write(buf.decode("utf-8", "replace"))
-if not buf:
-    print("(无输出：固件没在跑，或 console 仍指向 UART0)")
+    try:
+        d = ser.read(4096)
+    except Exception:
+        d = b""
+    if d:
+        buf.extend(d)
+ser.close()
+
+txt = buf.decode("utf-8", "replace")
+print(f"--- 收到 {len(buf)} 字节 ---")
+print(txt if txt.strip() else "(无输出：固件没在跑，或 console 仍指向 UART0)")
 PY
