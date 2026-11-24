@@ -6,6 +6,7 @@
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "mbedtls/ctr_drbg.h"
@@ -186,6 +187,11 @@ static void send_blob(mbedtls_ssl_context *ssl, const blob_t *b, const char *cty
     }
 }
 
+// 并发上限：无上行时后台应用会疯狂重试（实测峰值 20 连接/秒），
+// 每个连接一个 12KB 任务栈，不设闸会把内部 RAM 打光，商店的真请求反而建不了任务。
+#define TLS_MAX_CONN 6
+static SemaphoreHandle_t s_slots = NULL;
+
 // ---------------------------------------------------------------- 单连接
 static void conn_task(void *arg) {
     int fd = (int)(intptr_t)arg;
@@ -355,6 +361,9 @@ static void conn_task(void *arg) {
 done:
     shutdown(fd, 0);
     close(fd);
+    if (s_slots) {
+        xSemaphoreGive(s_slots);
+    }
     vTaskDelete(NULL);
 }
 
@@ -388,9 +397,21 @@ static void listen_task(void *arg) {
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
+        if (!s_slots) {
+            s_slots = xSemaphoreCreateCounting(TLS_MAX_CONN, TLS_MAX_CONN);
+        }
+        if (s_slots && xSemaphoreTake(s_slots, 0) != pdTRUE) {
+            // 槽位满：直接关，不建任务。客户端会退避重试，不占用我们内存
+            ESP_LOGD(TAG, "并发已满(%d), 拒绝", TLS_MAX_CONN);
+            close(fd);
+            continue;
+        }
         // 栈要够 mbedTLS 握手（8KB）
         if (xTaskCreate(conn_task, "tls", 12288, (void *)(intptr_t)fd, 5, NULL) != pdPASS) {
             close(fd);
+            if (s_slots) {
+                xSemaphoreGive(s_slots);
+            }
         }
     }
 }
