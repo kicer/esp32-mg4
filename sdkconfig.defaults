@@ -42,6 +42,10 @@ CONFIG_MBEDTLS_HARDWARE_AES=y
 # 硬件 MPI 在部分握手长度下会让 Finished 校验失败（实测 CDN 域名必挂），改软件实现
 # 代价：RSA2048 签名从 ~100ms 变 ~400ms，握手次数少可接受
 CONFIG_MBEDTLS_HARDWARE_MPI=n
+# 关键：mbedTLS 的堆分配走 PSRAM。内部 RAM 只有 512KB，
+# Wi-Fi + 6 个 12KB 任务栈 + TLS 上下文会把堆吃光，
+# 表现为 RSA 大数运算 "Memory allocation failed" -> PKCS#1 verification failed
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
 # 日志
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y

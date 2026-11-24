@@ -4,6 +4,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -230,6 +231,10 @@ static void conn_task(void *arg) {
         char ebuf[96] = {0};
         mbedtls_strerror(ret, ebuf, sizeof(ebuf));
         ESP_LOGW(TAG, "TLS 握手失败 %s: -0x%04X (%s)", sni, -ret, ebuf);
+        ESP_LOGW(TAG, "  堆: 内部 free=%u min=%u | PSRAM free=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
         mbedtls_ssl_free(ssl);
         free(ssl);
         goto done;
