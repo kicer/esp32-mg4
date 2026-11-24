@@ -28,8 +28,13 @@ jobs:
           cp build/bootloader/bootloader.bin        dist/bootloader.bin
           cp build/partition_table/partition-table.bin dist/partition-table.bin
           cp build/esp32-mg4.bin                     dist/esp32-mg4.bin
-          cd dist && sha256sum *.bin > SHA256SUMS
-          echo "=== 产物 ===" && ls -l
+          echo "=== 产物 ===" && ls -l dist
+
+      - name: Merge to single image
+        run: python3 tools/merge_bins.py dist
+
+      - name: Checksums
+        run: cd dist && sha256sum *.bin > SHA256SUMS && cat SHA256SUMS
 
       - name: Size report
         if: success()

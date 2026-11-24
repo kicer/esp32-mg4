@@ -1,0 +1,32 @@
+I (65996) wifi:new:<6,0>, old:<6,1>, ap:<6,1>, sta:<255,255>, prof:6
+I (65996) wifi:station: a4:83:e7:2e:de:d1 join, AID=1, bgn, 20
+I (66096) wifi:[0;32mI (66096) esp_netif_lwip: DHCP server assigned IP to a client, IP is: 192.168.2.2[0m
+<ba-add>idx:2 (ifx:1, a4:83:e7:2e:de:d1), tid:6, ssn:0, winSize:64
+I (66266) wifi:<ba-add>idx:3 (ifx:1, a4:83:e7:2e:de:d1), tid:0, ssn:2, winSize:64
+I (67726) wifi:<ba-add>idx:4 (ifx:1, a4:83:e7:2e:de:d1), tid:1, ssn:1, winSize:64
+[0;32mI (76876) dns: [HIJACK] 204.z-onesoft.com A -> 本地 (192.168.2.1)[0m
+[0;32mI (76886) dns: [HIJACK] prod-r-platform.z-onesoft.com A -> 本地 (192.168.2.1)[0m
+[0;32mI (76896) dns: [HIJACK] prod-dp-public-es33-tos.z-onesoft.com A -> 本地 (192.168.2.1)[0m
+[0;32mI (76906) dns: [HIJACK] prod-dp-public-es33.oss-cn-shanghai.aliyuncs.com A -> 本地 (192.168.2.1)[0m
+[0;32mI (76916) dns: [HIJACK] prod-r-platform.z-onesoft.com AAAA -> 空应答[0m
+[0;32mI (76946) http80: 204 -> 192.168.2.2[0m
+[0;32mI (76966) dns: [HIJACK] 204.z-onesoft.com A -> 本地 (192.168.2.1)[0m
+[0;32mI (76976) http80: 204 -> 192.168.2.2[0m
+[0;32mI (78396) tls443: POST prod-r-platform.z-onesoft.com/eco/ippf/appMarket/vehicle/banner/list (sni=prod-r-platform.z-onesoft.com, rule=2, range=-)[0m
+[0;32mI (78396) tls443: [patch] banner 780 bytes[0m
+[0;32mI (79016) tls443: POST prod-r-platform.z-onesoft.com/eco/ippf/appMarket/vehicle/category/recommend/list (sni=prod-r-platform.z-onesoft.com, rule=3, range=-)[0m
+[0;32mI (79016) tls443: [patch] recommend 1767 bytes[0m
+[0;32mI (79526) tls443: POST prod-r-platform.z-onesoft.com/eco/ippf/appMarket/vehicle/category/ordinary/list (sni=prod-r-platform.z-onesoft.com, rule=4, range=-)[0m
+[0;32mI (79536) tls443: [patch] ordinary 4158 bytes[0m
+[0;32mI (80086) tls443: POST prod-r-platform.z-onesoft.com/eco/ippf/appMarket/vehicle/app/detail (sni=prod-r-platform.z-onesoft.com, rule=1, range=-)[0m
+[0;32mI (80086) tls443: [patch] detail 1684 bytes (appId=appVersion_SELFTEST99)[0m
+[0;32mI (80646) tls443: GET prod-dp-public-es33-tos.z-onesoft.com/ecology/ecofile-f2382adef9d44098b67e9bfb10913a56.apk (sni=prod-dp-public-es33-tos.z-onesoft.com, rule=5, range=-)[0m
+[0;32mI (81196) tls443: [serve] APK 485818 bytes (range -1--1)[0m
+[0;32mI (81776) tls443: GET prod-dp-public-es33-tos.z-onesoft.com/ecology/ecofile-f2382adef9d44098b67e9bfb10913a56.apk (sni=prod-dp-public-es33-tos.z-onesoft.com, rule=5, range=bytes=0-0)[0m
+[0;32mI (81776) tls443: [serve] APK 485818 bytes (range 0-0)[0m
+[0;32mI (82386) tls443: GET prod-dp-public-es33-tos.z-onesoft.com/ecology/ecofile-8d0755c37a0347f38026885f6a647375.png (sni=prod-dp-public-es33-tos.z-onesoft.com, rule=6, range=-)[0m
+I (108086) wifi:station: a4:83:e7:2e:de:d1 leave, AID = 1, bss_flags is 658531, bss:0x3fca4580
+I (108086) wifi:new:<6,0>, old:<6,0>, ap:<6,1>, sta:<255,255>, prof:6
+I (108086) wifi:<ba-del>idx:3, tid:0
+I (108086) wifi:<ba-del>idx:4, tid:1
+I (108086) wifi:<ba-del>idx:2, tid:6

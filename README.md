@@ -1,171 +1,195 @@
 # esp32-mg4
 
-ESP32-S3 固件：开一个**没有上行**的热点，把车机应用商店的列表、详情、APK 下载
-全部在本地应答。车机连上它就能完成安装，全程不需要连接互联网。
+MG4 车机应用商店的本地注入固件 —— **ESP32-S3 纯 AP 实现**。
 
-面向上汽 MG4（车机代号 `ah4`，高通 SA8155P，Android 11 / SDK 30）。
-原理是应用商店的几个接口都可被本地数据替换，安装时的包名校验也由列表数据决定，
-所以只要把「接口响应」和「APK 下发」都搬到本地就能闭环。
+车机连上这个 AP 之后，应用商店的首页、详情页、APK 下载全部由 ESP32 本地应答，
+**不需要任何上行链路**（AP 自己不联网，也不替车机转发）。
+
+---
+
+## 提供的服务
+
+| 端口 | 协议 | 作用 |
+|---|---|---|
+| 53 | UDP | 劫持 4 个商店域名 → `192.168.2.1`，其余回 NXDOMAIN，AAAA 一律空应答 |
+| 80 | TCP | 任何请求回 `204`（车机联网探测 `http://204.z-onesoft.com/`） |
+| 443 | TCP | 按 SNI 分流：命中的走本地 TLS，未命中的读完 ClientHello 直接关闭 |
+
+本地应答的四个接口：
+
+```
+POST /eco/ippf/appMarket/vehicle/banner/list                 → banner.json
+POST /eco/ippf/appMarket/vehicle/category/recommend/list     → recommend.json
+POST /eco/ippf/appMarket/vehicle/category/ordinary/list      → ordinary.json
+POST /eco/ippf/appMarket/vehicle/app/detail                  → detail.json（appId/vin 从请求体回填）
+GET  /ecology/*.apk                                          → 内置 APK，支持 Range
+GET  /ecology/*.png                                          → 1×1 占位图
+```
+
+---
 
 ## 硬件
 
-| | |
-|---|---|
-| 芯片 | ESP32-S3 |
-| PSRAM | 8MB（Octal） |
-| Flash | 8MB（分区表按 8MB 配置，更大也能用） |
-| 接口 | USB-Serial/JTAG，烧录端口形如 `/dev/cu.usbmodem*` |
+- **ESP32-S3**，8MB flash + Octal PSRAM
+- 实测板：`ESP32-S3 (QFN56) rev v0.2`，MAC `cc:8d:a2:ee:9f:e4`
 
-## 结构
+AP 参数在 `main/main.c` 顶部：
+
+```c
+#define AP_SSID "MG4-AP"
+#define AP_PASS "mg4inject"     // 至少 8 位
+```
+
+IP 固定 `192.168.2.1`（与车机原有配置一致，见 `wifi_init_ap()`）。
+
+---
+
+## 目录
 
 ```
 main/
-├── main.c          NVS → AP(192.168.2.1) → 启动各服务
-├── dns_server.c    UDP 53：4 个域名解析到本机，其余 NXDOMAIN
-├── http80.c        TCP 80：任何请求回 204
-├── tls443.c        TCP 443：按 SNI 分流，命中的走本地 TLS 响应
-├── rules.c         域名/路径匹配、JSON 模板替换、资源 blob
-└── assets/
-    ├── detail.json / banner.json / recommend.json / ordinary.json
-    ├── mg4-adb.apk        要装进车机的 APK
-    ├── placeholder.png    1×1 占位图（图标/截图请求都回它）
-    ├── chain.pem          证书链
-    └── leaf.key.pem       证书私钥
+  main.c         AP 启动、服务编排
+  dns_server.c   UDP 53
+  http80.c       TCP 80 → 204
+  tls443.c       TCP 443：SNI 分流 + HTTP 响应 + 并发闸
+  rules.c/.h     域名/路径匹配、JSON 模板、资源 blob
+  assets/        4 个 JSON、APK、占位图、证书链与私钥
 tools/
-├── flash.sh        烧录
-├── check-certs.sh  检查证书链、SAN 覆盖、私钥配对
-├── gen-certs.sh    生成自签证书（仅本机调试用，上机无效）
-└── make-assets.py  校验/生成响应 JSON
+  flash.sh         烧录（优先单文件镜像）
+  merge_bins.py    三个 bin 合成一个可直接烧到 0x0 的镜像
+  selftest.sh      连上 AP 后的本地自检（13 组 / 19 项）
+  serial-log.sh    抓串口 N 秒
+  serial-watch.sh  后台持续记录串口到文件
+  check-certs.sh   校验证书链/有效期/SAN/私钥配对
+  gen-certs.sh     生成自签证书（仅供本机 curl 调试，车机不认）
+  make-assets.py   校验或重新生成 assets（含 detail 占位符注入）
 ```
+
+---
 
 ## 编译
 
-推送到 GitHub 后 Actions 自动构建（ESP-IDF v5.2 / esp32s3），产物：
+**CI（推荐）**：推送到仓库即可，`.github/workflows/build.yml` 会用 `espressif/idf:v5.2`
+编译、合并、打 checksum，并自动建一个 `build-N` 的 release，附件公开可下载。
 
-```
-bootloader/bootloader.bin
-partition_table/partition-table.bin
-esp32-mg4.bin
-```
-
-本地编译（需 ESP-IDF 5.2）：
+**本地**（需自装 ESP-IDF v5.2）：
 
 ```bash
 idf.py set-target esp32s3
 idf.py build
 ```
 
+---
+
 ## 烧录
 
+产物里 **`esp32-mg4-full.bin` 是单文件镜像**，一次烧到 `0x0` 就行：
+
 ```bash
-./tools/flash.sh                                  # 默认 /dev/cu.usbmodem14301 + build/
-./tools/flash.sh /dev/cu.usbmodem14301 ../build   # 指定端口和产物目录
+bash tools/flash.sh /dev/cu.usbmodem14301 dist
 ```
 
-偏移：`0x0` bootloader、`0x8000` 分区表、`0x10000` 应用。
+等价的手工命令：
 
-## 使用
-
-1. 上电，串口 115200 应看到：
-
-   ```
-   AP 已启动: SSID=MG4-AP  IP=192.168.2.1
-   DNS 服务启动 :53
-   HTTP 204 服务启动 :80
-   证书就绪，启动监听
-   TLS 服务启动 :443
-   ```
-
-2. 车机 WLAN 连 `MG4-AP`，密码 `mg4inject`。若提示「无法访问互联网」，选**保持连接**。
-3. 等约 10 秒（车机要跑完一轮联网探测），进应用商店 → 目标应用详情页 → 安装。
-
-## 配置
-
-`main/main.c` 顶部：
-
-```c
-#define AP_SSID "MG4-AP"
-#define AP_PASS "mg4inject"   // WPA2 要求至少 8 位
-#define AP_CHAN 6
+```bash
+esptool -c esp32s3 -p /dev/cu.usbmodem14301 -b 460800 \
+  write-flash --flash-mode dio --flash-freq 80m --flash-size 8MB \
+  0x0 esp32-mg4-full.bin
 ```
 
-AP 的地址固定 `192.168.2.1`。响应 JSON 里的资源 URL 用的是域名而不是 IP，
-所以换 IP 也不用改数据，只要 DNS 把它们指过来就行。
+`tools/merge_bins.py` 做的就是这个合并（布局 `0x0` bootloader / `0x8000` 分区表 /
+`0x10000` app，空隙填 `0xFF`）。分段烧录的方式也保留在 `flash.sh` 里，作为兜底。
+
+烧完 ESP32 自动重启，串口应该看到：
+
+```
+I (966) main: AP 已启动: SSID=MG4-AP  IP=192.168.2.1
+I (966) dns: DNS 服务启动 :53
+I (966) http80: HTTP 204 服务启动 :80
+I (976) tls443: 证书就绪，启动监听
+I (976) tls443: TLS 服务启动 :443
+I (976) main: 全部服务就绪：DNS:53  HTTP:80  TLS:443  （无上行）
+```
+
+---
+
+## 验证
+
+车机（或电脑）连上 `MG4-AP` 后跑：
+
+```bash
+bash tools/selftest.sh
+```
+
+覆盖 19 项：链路、DNS 劫持、AAAA 抑制、80 回 204、TLS 证书、三个列表接口、
+detail 的 appId/vin 回填、APK 大小与 sha256、Range 206、占位图、未命中快速关闭。
+
+参考结果：
+
+```
+通过 19 项，失败 0 项
+全部通过 —— 固件行为与设计一致
+```
+
+报告同时写到 `tools/selftest-report.txt`。
+
+### 看串口
+
+```bash
+bash tools/serial-log.sh 30     # 抓 30 秒，期间按一下 RESET
+bash tools/serial-watch.sh      # 后台持续记录到 logs/esp32-serial.log
+```
+
+> 脚本用 `os.open` 直接读，不碰 DTR/RTS。用 pyserial 默认打开会把 DTR 拉低，
+> 板子上 DTR 接 EN 的话等于一直按住复位，读到的永远是 0 字节。
+
+日志级别：命中请求是 `INFO`（能看到每个接口和字节数），未命中和并发拒绝是 `DEBUG`
+（默认不输出，不会刷屏）。
+
+---
 
 ## 证书
 
-`main/assets/chain.pem` 是 4 张证书（叶子 + 两张中间 + 交叉签名根），
-`leaf.key.pem` 是对应私钥。这套证书由一条已并入各大根库的中间证书签发，
-车机系统的信任库里有它，所以**车机上不需要装任何 CA**。
+`main/assets/` 里的 `chain.pem`（4 张）和 `leaf.key.pem` 是一套 eMudhra 签发的证书，
+SAN 覆盖：
 
-限制：该中间证书已于 2026-10 被吊销并从根库移除，因此这套证书只对
-**未更新过信任库的旧车机**有效。车机一旦更新了系统证书，需要换成它信任的证书。
+```
+prod-r-platform.z-onesoft.com
+*.z-onesoft.com                     ← 覆盖 CDN 和 204 探测域名
+prod-dp-public-es33.oss-cn-shanghai.aliyuncs.com
+```
+
+**这套证书只对信任库较旧的车机有效**。签发它的中间证书已在 2026-10 被吊销，
+车机若更新过信任库，握手会被拒绝。
 
 检查当前证书：
 
 ```bash
-./tools/check-certs.sh
+bash tools/check-certs.sh
 ```
 
-会列出链上每张证书的主题/签发者/有效期、SAN 是否覆盖 4 个域名、私钥是否配对。
+换证书：替换 `chain.pem` / `leaf.key.pem` 后重新编译。
 
-换证书只需替换 `main/assets/chain.pem` 和 `leaf.key.pem` 后重新编译。
-`tools/gen-certs.sh` 生成的是自签 CA + 叶子，只能用于本机 `curl --cacert` 调试，
-**上机会握手失败**（车机不认这个 CA）。
+`tools/gen-certs.sh` 生成的是自签证书，**只能在电脑上用 `curl --cacert` 调试固件**，
+车机不会信任。
 
-## 工作原理
-
-```
-车机连 AP
-  ├─ DHCP 拿到 192.168.2.x，DNS = 192.168.2.1
-  ├─ 联网探测 http://204.z-onesoft.com/  → 80 端口一律回 204 → 车机判「有网」
-  └─ 应用商店
-       ├─ DNS 把 4 个商店域名解析到 192.168.2.1
-       ├─ 443 分流：读 ClientHello 取 SNI
-       │    ├─ 商店域名 → mbedTLS 握手 → 按路径回本地数据
-       │    └─ 其他域名 → 直接关连接（无上行，不转发）
-       └─ 路径路由
-            /eco/ippf/appMarket/vehicle/banner/list                → banner.json
-            /eco/ippf/appMarket/vehicle/category/recommend/list    → recommend.json
-            /eco/ippf/appMarket/vehicle/category/ordinary/list     → ordinary.json
-            /eco/ippf/appMarket/vehicle/app/detail                 → detail.json（appId 从请求体填）
-            /ecology/*.apk                                         → mg4-adb.apk（支持 Range）
-            /ecology/*.png                                         → placeholder.png
-```
-
-几个必须注意的点：
-
-- **不能启用 IPv6**。车机拿到 IPv6 默认路由后，HTTP 会绕开 IPv4 的 DNS 劫持和
-  TLS 分流，出现「列表能加载、图片和详情页卡住」的现象。本工程 `CONFIG_LWIP_IPV6`
-  保持关闭，SoftAP 也不发 RA。
-- **80 端口必须在听**。它只服务 204 探测，但少了它车机会判定这个 Wi-Fi 没网。
-- **detail 的 `appId` 必须来自请求体**。写死会导致详情页空白，并在车机上抛
-  `lateinit property mDetailApp has not been initialized`。
-- **列表接口要一起改**。安装时 `PackageInstaller` 会校验「详情页的 appPackage
-  是否等于 APK 实际包名」，只改 detail 不改列表会得到 `INSTALL_FAILED_INVALID_APK`。
-- **字段类型要和原始响应一致**。例如 `appVersionCode` 是字符串 `"25"`，改成数字会让
-  Kotlin 反序列化失败。
-
-## 工具
-
-```bash
-./tools/make-assets.py                              # 校验 assets 里的 JSON
-./tools/make-assets.py ../store_rules.json          # 从规则文件重新生成
-./tools/check-certs.sh                              # 检查证书链
-./tools/gen-certs.sh                                # 生成自签证书（调试用）
-```
-
-`make-assets.py` 会顺带检查 `appVersionCode` 是不是字符串、detail 模板的
-`__APPID__` / `__VIN__` 占位符是否还在。
+---
 
 ## 已知限制
 
-- 每个 TLS 连接占 12KB 任务栈，并发数受内存限制，车机通常只开 2-4 个连接
-- 后台应用（语音、地图、音乐）会持续重连并被关闭，属正常现象，不影响商店
-- 只对未更新信任库的车机有效（见「证书」）
-- 换 APK 需要改 `main/assets/mg4-adb.apk` 并同步更新响应 JSON 里的
-  `appResourceUri`、`appPackage`、`appVersionCode`
+- **未命中的 SNI 直接关闭连接**，不代为转发。无上行时后台应用（百度地图、语音）会持续重试，
+  实测峰值约 20 连接/秒，因此 443 设了 **6 个并发槽位**，超限的连接立即关闭，
+  避免 12KB 任务栈把内部 RAM 打光。
+- 商店之外的联机功能（在线音乐、地图路况等）在纯 AP 环境下不可用，属预期行为。
+- APK 与 JSON 都编进固件，换 APK 需要重新编译烧录。
 
-## 免责
+---
 
-仅用于自有车辆的调试与学习。注入的是自己的 APK，改的是自己车机的商店响应。
+## 工作原理
+
+1. 车机连上 AP，DHCP 下发 `192.168.2.1` 作为网关和 DNS
+2. 车机探测 `http://204.z-onesoft.com/`，DNS 指向本机，80 端口回 204 → 判定联网正常
+3. 商店请求 `prod-r-platform.z-onesoft.com`，DNS 指向本机，443 端口按 SNI 命中规则，
+   用内置证书完成 TLS 握手，直接返回本地 JSON
+4. 详情页里的 `appResourceUri` 指向 CDN 域名，同样被劫持，APK 从 flash 读出下发
+5. Android 的 APK 校验只看包名与签名，与下载来源无关，装完即生效
