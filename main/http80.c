@@ -1,6 +1,7 @@
 // TCP 80：任何请求都回 204 —— 车机联网探测走 http://204.z-onesoft.com/
 #include <stdint.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
