@@ -1,8 +1,10 @@
 name: build
 
+# 只有打 tag（v*）才编译并出 release；普通 push 不浪费 CI 额度
 on:
   push:
-    branches: [main]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 # 建 release 需要写权限
@@ -45,8 +47,8 @@ jobs:
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: build-${{ github.run_number }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('build-{0}', github.run_number) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('build-{0}', github.run_number) }}
           prerelease: true
           make_latest: false
           body: |
